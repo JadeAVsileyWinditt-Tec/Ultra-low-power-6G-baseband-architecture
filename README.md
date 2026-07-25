@@ -87,3 +87,10 @@ All rights reserved.
 
 This repository and its contents are provided for research and educational purposes only.  
 No commercial use, reproduction, or distribution is permitted without prior written permission from the author.
+
+Copyright © 2026 Jade Siley-Winditt
+
+All rights reserved.
+
+This repository and its contents are provided for research and educational purposes only.  
+No commercial use, reproduction, modification, or distribution is permitted without prior written permission from the copyright holder.
