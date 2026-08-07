@@ -1,0 +1,2 @@
+# Minimal dependencies for the TBU power model and demos
+numpy>=1.24
