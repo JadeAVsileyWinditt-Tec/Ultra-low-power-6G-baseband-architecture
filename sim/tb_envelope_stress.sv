@@ -1,5 +1,8 @@
 //==============================================================================
-// tb_envelope_stress.sv – Envelope stress + live TBU assertions
+// tb_envelope_stress.sv – End-to-end envelope stress with live control signals
+//
+// Observes real throttle and prune level exported from the fabric hierarchy.
+// Assertions see the same signals the controller produces.
 //==============================================================================
 
 `timescale 1ns / 1ps
@@ -18,8 +21,11 @@ module tb_envelope_stress;
   logic        ops_valid, fft_in_valid;
   logic [W-1:0] in_re [N_BF*2], in_im [N_BF*2];
   logic [W-1:0] tw_re [N_BF], tw_im [N_BF];
+
   logic [1:0]  region_code;
   logic        envelope_alarm, any_fft_valid;
+  logic [15:0] throttle_q16;
+  logic [1:0]  prune_level;
 
   full_fabric_top #(
     .NUM_TILES       (16),
@@ -39,15 +45,17 @@ module tb_envelope_stress;
     .tw_im                 (tw_im),
     .global_region_code    (region_code),
     .global_envelope_alarm (envelope_alarm),
-    .any_fft_valid         (any_fft_valid)
+    .any_fft_valid         (any_fft_valid),
+    .global_throttle_q16   (throttle_q16),
+    .global_prune_level    (prune_level)
   );
 
-  // Live safety checks
+  // Assertions on live control signals
   tbu_assertions #(.OPS_WIDTH(32)) u_assert (
     .clk            (clk),
     .rst_n          (rst_n),
-    .ops_executed   (ops_request),   // proxy for this stress view
-    .throttle_q16   (16'h8000),      // placeholder – tighten when throttle is exported
+    .ops_executed   (ops_request),
+    .throttle_q16   (throttle_q16),
     .region_code    (region_code),
     .envelope_alarm (envelope_alarm),
     .sample_valid   (ops_valid)
@@ -76,8 +84,8 @@ module tb_envelope_stress;
     rst_n = 1;
     repeat (10) @(posedge clk);
 
-    $display("=== ENVELOPE STRESS + ASSERTIONS ===");
-    $display("phase     ops_req     region     alarm  fft");
+    $display("=== END-TO-END ENVELOPE STRESS ===");
+    $display("phase     ops_req     region     thr    prune  alarm  fft");
 
     $display("-- ramp --");
     for (i = 0; i < 8; i++) begin
@@ -86,8 +94,9 @@ module tb_envelope_stress;
       @(posedge clk);
       ops_valid = 0; fft_in_valid = 0;
       repeat (3) @(posedge clk);
-      $display("ramp    %10d  %-8s   %0d     %0d",
-               ops_request, region_name, envelope_alarm, any_fft_valid);
+      $display("ramp    %10d  %-8s  0x%04h  %0d     %0d     %0d",
+               ops_request, region_name, throttle_q16,
+               prune_level, envelope_alarm, any_fft_valid);
     end
 
     $display("-- stress --");
@@ -97,8 +106,9 @@ module tb_envelope_stress;
       @(posedge clk);
       ops_valid = 0; fft_in_valid = 0;
       repeat (3) @(posedge clk);
-      $display("stress  %10d  %-8s   %0d     %0d",
-               ops_request, region_name, envelope_alarm, any_fft_valid);
+      $display("stress  %10d  %-8s  0x%04h  %0d     %0d     %0d",
+               ops_request, region_name, throttle_q16,
+               prune_level, envelope_alarm, any_fft_valid);
     end
 
     $display("-- cool --");
@@ -108,12 +118,10 @@ module tb_envelope_stress;
       @(posedge clk);
       ops_valid = 0; fft_in_valid = 0;
       repeat (3) @(posedge clk);
-      $display("cool    %10d  %-8s   %0d     %0d",
-               ops_request, region_name, envelope_alarm, any_fft_valid);
+      $display("cool    %10d  %-8s  0x%04h  %0d     %0d     %0d",
+               ops_request, region_name, throttle_q16,
+               prune_level, envelope_alarm, any_fft_valid);
     end
 
     $display("=== STRESS TEST FINISHED ===");
     $finish;
-  end
-
-endmodule : tb_envelope_stress
