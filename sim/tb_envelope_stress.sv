@@ -1,9 +1,5 @@
 //==============================================================================
-// tb_envelope_stress.sv – Deliberately tries to break the 4 W envelope
-//
-// Ramps load hard, then cools down.  Observes region / alarm / FFT activity.
-// Success = control loop responds (region moves, alarm behaves, fabric
-// continues to produce results under pruning).
+// tb_envelope_stress.sv – Envelope stress + live TBU assertions
 //==============================================================================
 
 `timescale 1ns / 1ps
@@ -46,6 +42,17 @@ module tb_envelope_stress;
     .any_fft_valid         (any_fft_valid)
   );
 
+  // Live safety checks
+  tbu_assertions #(.OPS_WIDTH(32)) u_assert (
+    .clk            (clk),
+    .rst_n          (rst_n),
+    .ops_executed   (ops_request),   // proxy for this stress view
+    .throttle_q16   (16'h8000),      // placeholder – tighten when throttle is exported
+    .region_code    (region_code),
+    .envelope_alarm (envelope_alarm),
+    .sample_valid   (ops_valid)
+  );
+
   string region_name;
   always_comb case (region_code)
     2'd0: region_name = "BOUND";
@@ -69,10 +76,9 @@ module tb_envelope_stress;
     rst_n = 1;
     repeat (10) @(posedge clk);
 
-    $display("=== ENVELOPE STRESS TEST ===");
+    $display("=== ENVELOPE STRESS + ASSERTIONS ===");
     $display("phase     ops_req     region     alarm  fft");
 
-    // Phase A – gentle
     $display("-- ramp --");
     for (i = 0; i < 8; i++) begin
       ops_request  = 32'd5_000_000 * (i + 1);
@@ -84,7 +90,6 @@ module tb_envelope_stress;
                ops_request, region_name, envelope_alarm, any_fft_valid);
     end
 
-    // Phase B – over-subscribe hard
     $display("-- stress --");
     for (i = 0; i < 12; i++) begin
       ops_request  = 32'd80_000_000 + i * 32'd25_000_000;
@@ -96,7 +101,6 @@ module tb_envelope_stress;
                ops_request, region_name, envelope_alarm, any_fft_valid);
     end
 
-    // Phase C – cool down
     $display("-- cool --");
     for (i = 0; i < 6; i++) begin
       ops_request  = 32'd3_000_000;
