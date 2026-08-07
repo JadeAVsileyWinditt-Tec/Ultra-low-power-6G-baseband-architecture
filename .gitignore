@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+dist/
+build/
+*.egg
+.venv/
+venv/
+.env
+
+# Simulation / EDA
+*.vcd
+*.fst
+*.log
+*.jou
+*.pb
+xsim.dir/
+.Xil/
+*.wdb
+work/
+*.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.code-workspace
