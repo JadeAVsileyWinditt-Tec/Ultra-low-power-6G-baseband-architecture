@@ -47,3 +47,31 @@ The **Topological Boundary Unit (TBU)** provides continuous thermal control. The
 ---
 
 ## Repository Structure
+---
+
+## Status
+
+Research & architectural exploration phase with working TBU mathematics, power model, and behavioural RTL skeletons for the intensity limiter, compute tile, and Thermal Boundary Control Unit.
+
+Detailed cycle-accurate simulations and approximate-computing datapaths are under development.
+
+---
+
+## Citation
+
+If you reference this work, please cite:
+
+> Jade Siley-Winditt – Ultra-Low-Power 6G Baseband Architecture (2048-tile fabric, ≤ 4 W)  
+> Jade Siley-Winditt – The Topological Boundary Unit (TBU): A Unified Mathematical Framework for Boundary-State Dynamics (2026)
+
+---
+
+**Target: high-throughput 6G baseband processing inside the thermal limits of a mobile device.**
+
+## License & Legal
+
+Copyright © 2026 Jade Siley-Winditt (@phX_risingseer).  
+All rights reserved.
+
+This repository and its contents are provided for research and educational purposes only.  
+No commercial use, reproduction, modification, or distribution is permitted without prior written permission from the copyright holder.
