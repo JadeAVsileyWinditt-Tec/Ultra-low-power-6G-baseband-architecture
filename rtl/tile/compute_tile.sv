@@ -1,8 +1,9 @@
 //==============================================================================
-// compute_tile.sv – Compute tile with intensity limiter + approximate ALU
+// compute_tile.sv – Full tile: intensity limiter + pruning + FFT butterfly
 //
-// Now couples algorithmic intensity reduction (approx_alu) with the
-// thermal containment from the TBCU.
+// Intensity reduction now comes from two cooperating mechanisms:
+//   1. TBCU thermal throttle  (containment force)
+//   2. Pruning controller     (algorithmic approx / skip)
 //==============================================================================
 
 `timescale 1ns / 1ps
@@ -17,33 +18,36 @@ module compute_tile #(
   input  logic                       clk,
   input  logic                       rst_n,
 
-  // Workload request from scheduler / NoC
+  // Workload
   input  logic [OPS_WIDTH-1:0]       ops_request,
   input  logic                       ops_valid,
 
-  // Throttle from TBCU (global or regional)
+  // From regional / global TBCU
   input  logic [15:0]                throttle_q16,
+  input  logic [1:0]                 region_code,
 
-  // Optional direct approx control (1 = force approximate path)
-  input  logic                       force_approx,
+  // FFT kernel inputs (complex pair + twiddle)
+  input  logic [ALU_WIDTH-1:0]       a_re, a_im,
+  input  logic [ALU_WIDTH-1:0]       b_re, b_im,
+  input  logic [ALU_WIDTH-1:0]       tw_re, tw_im,
+  input  logic                       fft_in_valid,
 
-  // Simple ALU operands for this skeleton
-  input  logic [ALU_WIDTH-1:0]       alu_a,
-  input  logic [ALU_WIDTH-1:0]       alu_b,
-  input  logic [2:0]                 alu_opcode,
-
-  // Status back to TBCU / power monitor
+  // Status / results
   output logic [OPS_WIDTH-1:0]       ops_executed,
   output logic                       intensity_cap_hit,
   output logic                       tile_active,
-  output logic [ALU_WIDTH-1:0]       alu_result,
-  output logic                       alu_result_valid
+  output logic [ALU_WIDTH-1:0]       a_out_re, a_out_im,
+  output logic [ALU_WIDTH-1:0]       b_out_re, b_out_im,
+  output logic                       fft_out_valid,
+  output logic [1:0]                 prune_level
 );
 
   logic [OPS_WIDTH-1:0] ops_grant;
+  logic                 approx_en;
+  logic                 skip_noncritical;
 
   //--------------------------------------------------------------------------
-  // Intensity limiter (hard cap + soft TBU throttle)
+  // Intensity limiter
   //--------------------------------------------------------------------------
   intensity_limiter #(
     .OPS_WIDTH(OPS_WIDTH)
@@ -57,24 +61,42 @@ module compute_tile #(
   );
 
   //--------------------------------------------------------------------------
-  // Approximate ALU – enabled when throttle is low or force_approx is set
+  // Pruning controller (algorithmic intensity reduction)
   //--------------------------------------------------------------------------
-  // throttle_q16 is Q0.16; when it drops below 0.5 we prefer approximate ops
-  logic approx_en;
-  assign approx_en = force_approx | (throttle_q16 < 16'h8000);
+  pruning_controller u_prune (
+    .clk              (clk),
+    .rst_n            (rst_n),
+    .throttle_q16     (throttle_q16),
+    .region_code      (region_code),
+    .approx_en        (approx_en),
+    .prune_level      (prune_level),
+    .skip_noncritical (skip_noncritical)
+  );
 
-  approx_alu #(
-    .WIDTH      (ALU_WIDTH),
-    .TRUNC_BITS (2)
-  ) u_alu (
-    .clk          (clk),
-    .rst_n        (rst_n),
-    .opcode       (alu_opcode),
-    .approx_en    (approx_en),
-    .op_a         (alu_a),
-    .op_b         (alu_b),
-    .result       (alu_result),
-    .result_valid (alu_result_valid)
+  //--------------------------------------------------------------------------
+  // FFT butterfly kernel (uses approx ALU when approx_en is high)
+  //--------------------------------------------------------------------------
+  logic fft_fire;
+  assign fft_fire = fft_in_valid & ~skip_noncritical;
+
+  fft_butterfly #(
+    .WIDTH(ALU_WIDTH)
+  ) u_fft (
+    .clk        (clk),
+    .rst_n      (rst_n),
+    .approx_en  (approx_en),
+    .in_valid   (fft_fire),
+    .a_re       (a_re),
+    .a_im       (a_im),
+    .b_re       (b_re),
+    .b_im       (b_im),
+    .tw_re      (tw_re),
+    .tw_im      (tw_im),
+    .a_out_re   (a_out_re),
+    .a_out_im   (a_out_im),
+    .b_out_re   (b_out_re),
+    .b_out_im   (b_out_im),
+    .out_valid  (fft_out_valid)
   );
 
   //--------------------------------------------------------------------------
