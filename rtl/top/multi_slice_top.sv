@@ -1,9 +1,5 @@
 //==============================================================================
-// multi_slice_top.sv – Multiple fabric slices stitched together
-//
-// This is the structural step between a single slice and the full 2048-tile
-// fabric.  Each slice carries its own regional TBCU, DSP tiles, and NoC
-// address map.  A thin top-level aggregates status.
+// multi_slice_top.sv – Multi-slice top with exported control status
 //==============================================================================
 
 `timescale 1ns / 1ps
@@ -11,11 +7,11 @@
 import tbu_params_pkg::*;
 
 module multi_slice_top #(
-  parameter int N_SLICES       = 4,
+  parameter int N_SLICES        = 4,
   parameter int TILES_PER_SLICE = 8,
-  parameter int N_REGIONS      = 4,
-  parameter int ALU_WIDTH      = 16,
-  parameter int N_BUTTERFLIES  = 4
+  parameter int N_REGIONS       = 4,
+  parameter int ALU_WIDTH       = 16,
+  parameter int N_BUTTERFLIES   = 4
 ) (
   input  logic                       clk,
   input  logic                       rst_n,
@@ -30,12 +26,18 @@ module multi_slice_top #(
 
   output logic [1:0]                 global_region_code,
   output logic                       global_envelope_alarm,
-  output logic                       any_fft_valid
+  output logic                       any_fft_valid,
+
+  // Observable control
+  output logic [15:0]                global_throttle_q16,
+  output logic [1:0]                 global_prune_level
 );
 
-  logic [1:0]  slice_region [N_SLICES];
-  logic        slice_alarm  [N_SLICES];
-  logic        slice_fft    [N_SLICES];
+  logic [1:0]  slice_region   [N_SLICES];
+  logic        slice_alarm    [N_SLICES];
+  logic        slice_fft      [N_SLICES];
+  logic [15:0] slice_throttle [N_SLICES];
+  logic [1:0]  slice_prune    [N_SLICES];
 
   genvar s;
   generate
@@ -47,34 +49,39 @@ module multi_slice_top #(
         .N_BUTTERFLIES (N_BUTTERFLIES),
         .SLICE_ID      (s)
       ) u_slice (
-        .clk            (clk),
-        .rst_n          (rst_n),
-        .ops_request    (ops_request),
-        .ops_valid      (ops_valid),
-        .fft_in_valid   (fft_in_valid),
-        .in_re          (in_re),
-        .in_im          (in_im),
-        .tw_re          (tw_re),
-        .tw_im          (tw_im),
-        .region_code    (slice_region[s]),
-        .envelope_alarm (slice_alarm[s]),
-        .any_fft_valid  (slice_fft[s])
+        .clk               (clk),
+        .rst_n             (rst_n),
+        .ops_request       (ops_request),
+        .ops_valid         (ops_valid),
+        .fft_in_valid      (fft_in_valid),
+        .in_re             (in_re),
+        .in_im             (in_im),
+        .tw_re             (tw_re),
+        .tw_im             (tw_im),
+        .region_code       (slice_region[s]),
+        .envelope_alarm    (slice_alarm[s]),
+        .any_fft_valid     (slice_fft[s]),
+        .mean_throttle_q16 (slice_throttle[s]),
+        .max_prune_level   (slice_prune[s])
       );
     end
   endgenerate
 
-  // Global status = hottest region + any alarm + any FFT activity
   always_comb begin
     global_envelope_alarm = 1'b0;
-    global_region_code    = 2'd2;   // FREE
+    global_region_code    = 2'd2;
     any_fft_valid         = 1'b0;
+    global_throttle_q16   = '0;
+    global_prune_level    = 2'd0;
+
     for (int i = 0; i < N_SLICES; i++) begin
-      if (slice_alarm[i])
-        global_envelope_alarm = 1'b1;
+      if (slice_alarm[i]) global_envelope_alarm = 1'b1;
       if (slice_region[i] < global_region_code)
         global_region_code = slice_region[i];
-      if (slice_fft[i])
-        any_fft_valid = 1'b1;
+      if (slice_fft[i]) any_fft_valid = 1'b1;
+      global_throttle_q16 += slice_throttle[i] / N_SLICES;
+      if (slice_prune[i] > global_prune_level)
+        global_prune_level = slice_prune[i];
     end
   end
 
