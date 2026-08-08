@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """
-Co-simulation harness – proves the ≤4 W story.
+Co-simulation harness – fabric-wide ≤4 W envelope proof.
 
 Mirrors RTL policy:
   - inverted logistic throttle (TBCU)
   - pruning levels (pruning_controller)
   - intensity hard-cap + approx factor (energy_model)
+
+Power is computed over the full tile fabric (n_tiles × ops/tile × energy).
 """
 
 from __future__ import annotations
@@ -21,7 +23,7 @@ from tbu.core import TBUParams, boundary_measure, classify_region, Region
 
 
 def rtl_throttle(power_W: float, tbu: TBUParams) -> float:
-    """1 - B_δ(P)  → high power produces strong containment."""
+    """1 - B_δ(P) → high power produces strong containment."""
     return float(1.0 - boundary_measure(power_W, tbu))
 
 
@@ -41,52 +43,71 @@ def run_harness(
     tbu: TBUParams = TBUParams(S_crit=4.0, delta=0.30, K=12.0),
 ) -> list[dict]:
     if load_factors is None:
-        # Deliberately crosses the design point
+        # Design point → over-subscribe past envelope → cool-down
         load_factors = list(np.concatenate([
-            np.linspace(0.05, 1.0, 8),
-            np.linspace(1.1, 2.8, 10),
-            np.linspace(1.5, 0.2, 5),
+            np.linspace(0.2, 1.0, 5),
+            np.linspace(1.2, 3.0, 10),
+            np.linspace(1.0, 0.3, 4),
         ]))
 
-    print("=" * 72)
-    print("TBU Co-simulation – Envelope Proof")
-    print("=" * 72)
+    n = energy.n_tiles
+    e_op = energy.energy_per_op_J
+    cap_tile = energy.max_ops_per_tile
+
+    print("=" * 74)
+    print("TBU Co-simulation – Fabric Envelope Proof (2048 tiles)")
+    print("=" * 74)
     print(energy.summary())
     print(f"TBU  S_crit={tbu.S_crit} W   δ={tbu.delta} W")
     print()
-    print(f"{'Load':>6} {'Req ops/tile':>14} {'Eff ops':>12} {'Power':>8} "
-          f"{'Thr':>6} {'Region':<10} {'Prune':>5} {'OK':>4}")
-    print("-" * 72)
+    print(f"{'Load':>6} {'Unconst W':>10} {'Ctrl W':>8} {'Thr':>6} "
+          f"{'Region':<10} {'Prune':>5} {'OK':>4}")
+    print("-" * 74)
 
-    full = energy.max_ops_per_tile
-    rows = []
-    peak_power = 0.0
+    rows: list[dict] = []
+    peak_ctrl = 0.0
+    peak_unconst = 0.0
 
     for load in load_factors:
-        requested = load * full
-        power_raw = float(energy.power_W(requested, throttle=1.0))
-        thr = rtl_throttle(power_raw, tbu)
-        region = classify_region(power_raw, tbu)
+        req_tile = load * cap_tile
+        # Unconstrained fabric power if the request were served raw
+        unconst = float(n * req_tile * e_op)
+        peak_unconst = max(peak_unconst, unconst)
+
+        thr = rtl_throttle(unconst, tbu)
+        region = classify_region(unconst, tbu)
         approx_en, prune_level = rtl_prune(region, thr)
 
-        eff = energy.effective_ops(requested, approx_en=approx_en, prune_level=prune_level)
-        power = float(energy.power_W(eff, throttle=thr))
-        peak_power = max(peak_power, power)
-        ok = power <= energy.thermal_envelope_W + 0.05  # small numerical tolerance
+        # Controlled: intensity hard-cap + prune + approx + throttle
+        eff_tile = energy.effective_ops(
+            req_tile, approx_en=approx_en, prune_level=prune_level
+        )
+        ctrl = float(n * eff_tile * e_op * thr)
+        peak_ctrl = max(peak_ctrl, ctrl)
+        ok = ctrl <= energy.thermal_envelope_W + 0.05
 
-        print(f"{load:6.2f} {requested:14.3e} {eff:12.3e} {power:8.3f} "
-              f"{thr:6.3f} {region.name:<10} {prune_level:5d} {'✅' if ok else '❌':>4}")
+        print(f"{load:6.2f} {unconst:10.3f} {ctrl:8.3f} {thr:6.3f} "
+              f"{region.name:<10} {prune_level:5d} {'YES' if ok else 'NO':>4}")
 
         rows.append({
-            "load": load, "power": power, "throttle": thr,
-            "region": region.name, "prune": prune_level, "ok": ok,
+            "load": load,
+            "unconstrained_W": unconst,
+            "controlled_W": ctrl,
+            "throttle": thr,
+            "region": region.name,
+            "prune": prune_level,
+            "ok": ok,
         })
 
-    print("-" * 72)
-    print(f"Peak controlled power : {peak_power:.3f} W")
-    print(f"Thermal envelope      : {energy.thermal_envelope_W:.3f} W")
-    print(f"Envelope respected    : {'YES' if peak_power <= energy.thermal_envelope_W + 0.05 else 'NO'}")
-    print("=" * 72)
+    print("-" * 74)
+    print(f"Peak unconstrained power : {peak_unconst:.3f} W")
+    print(f"Peak controlled power    : {peak_ctrl:.3f} W")
+    print(f"Thermal envelope         : {energy.thermal_envelope_W:.3f} W")
+    print(f"Headroom under envelope  : {energy.thermal_envelope_W - peak_ctrl:.3f} W")
+    print(f"Envelope respected       : "
+          f"{'YES' if peak_ctrl <= energy.thermal_envelope_W + 0.05 else 'NO'}")
+    print(f"Intensity-cap design pwr : {energy.power_at_full_intensity_W:.3f} W")
+    print("=" * 74)
     return rows
 
 
